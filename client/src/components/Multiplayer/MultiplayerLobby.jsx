@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import io from 'socket.io-client';
+import socketService from '../../services/socketService';
 
 const MultiplayerLobby = ({ 
   gameType, 
@@ -8,110 +8,251 @@ const MultiplayerLobby = ({
   onGameStart,
   onCancel 
 }) => {
-  const { user } = useAuth();
-  const [socket, setSocket] = useState(null);
+  const { user, token } = useAuth();
   const [roomId, setRoomId] = useState(null);
-  const [status, setStatus] = useState('connecting'); // connecting, waiting, ready, starting
+  const [status, setStatus] = useState('idle'); // idle, browsing, waiting, ready, starting
   const [players, setPlayers] = useState([]);
   const [isReady, setIsReady] = useState(false);
-  const [searchingForRoom, setSearchingForRoom] = useState(true);
+  const [availableRooms, setAvailableRooms] = useState([]);
+  const [manualRoomId, setManualRoomId] = useState('');
+  const [error, setError] = useState(null);
+  const [isAutoMatching, setIsAutoMatching] = useState(false);
 
   useEffect(() => {
-    // Connect to socket
-    const token = localStorage.getItem('token');
-    const newSocket = io(process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000', {
-      auth: { token }
+    if (token) {
+      socketService.connect(token);
+    }
+
+    return () => {
+      // Don't disconnect global socket
+    };
+  }, [token]);
+
+  const fetchAvailableRooms = () => {
+    if (!socketService.socket?.connected) {
+      setError('Not connected to server');
+      return;
+    }
+    socketService.emit('multiplayer:get-rooms', { gameType });
+  };
+
+  const startAutoMatch = () => {
+    setIsAutoMatching(true);
+    setStatus('searching');
+    setError(null);
+    
+    socketService.socket?.emit('multiplayer:join', { 
+      gameType, 
+      roomId: null, 
+      userId: user._id,
+      username: user.username
+    });
+  };
+
+  const joinRoomById = (targetRoomId) => {
+    if (!targetRoomId || targetRoomId.trim() === '') {
+      setError('Please enter a room ID');
+      return;
+    }
+
+    setError(null);
+    setStatus('joining');
+    
+    socketService.socket?.emit('multiplayer:join', { 
+      gameType, 
+      roomId: targetRoomId, 
+      userId: user._id,
+      username: user.username
+    });
+  };
+
+  useEffect(() => {
+    if (!socketService.socket?.connected) return;
+
+    socketService.on('multiplayer:rooms-list', ({ rooms }) => {
+      console.log('Available rooms:', rooms);
+      setAvailableRooms(rooms);
+      setStatus('browsing');
     });
 
-    newSocket.on('connect', () => {
-      console.log('Connected to multiplayer server');
-      setStatus('waiting');
-      setSocket(newSocket);
-      
-      // Get available rooms
-      newSocket.emit('multiplayer:get-rooms', { gameType });
-    });
-
-    newSocket.on('multiplayer:rooms-list', ({ rooms }) => {
-      if (rooms.length > 0 && searchingForRoom) {
-        // Auto-join first available room
-        const room = rooms[0];
-        newSocket.emit('multiplayer:join', { 
-          gameType, 
-          roomId: room.roomId, 
-          userId: user._id 
-        });
-        setSearchingForRoom(false);
-      } else if (rooms.length === 0 && searchingForRoom) {
-        // Create new room
-        newSocket.emit('multiplayer:join', { 
-          gameType, 
-          roomId: null, 
-          userId: user._id 
-        });
-        setSearchingForRoom(false);
-      }
-    });
-
-    newSocket.on('multiplayer:room-created', ({ roomId: newRoomId }) => {
+    socketService.on('multiplayer:room-created', ({ roomId: newRoomId }) => {
+      console.log('Room created:', newRoomId);
       setRoomId(newRoomId);
       setPlayers([{ userId: user._id, username: user.username, ready: false }]);
       setStatus('waiting');
+      setIsAutoMatching(false);
     });
 
-    newSocket.on('multiplayer:player-joined', ({ roomId: joinedRoomId, players: updatedPlayers }) => {
+    socketService.on('multiplayer:player-joined', ({ roomId: joinedRoomId, players: updatedPlayers }) => {
+      console.log('Player joined room:', joinedRoomId, updatedPlayers);
       setRoomId(joinedRoomId);
       setPlayers(updatedPlayers);
       setStatus('waiting');
+      setIsAutoMatching(false);
+      setError(null);
     });
 
-    newSocket.on('multiplayer:ready-status', ({ players: updatedPlayers, allReady }) => {
+    socketService.on('multiplayer:ready-status', ({ players: updatedPlayers, allReady }) => {
+      console.log('Ready status updated:', updatedPlayers, allReady);
       setPlayers(updatedPlayers);
       if (allReady) {
         setStatus('starting');
       }
     });
 
-    newSocket.on('multiplayer:game-start', ({ startTime }) => {
-      onGameStart(newSocket, roomId);
+    socketService.on('multiplayer:game-start', ({ startTime }) => {
+      console.log('Game starting...');
+      onGameStart(socketService.socket, roomId);
     });
 
-    newSocket.on('multiplayer:player-left', ({ players: updatedPlayers }) => {
+    socketService.on('multiplayer:player-left', ({ players: updatedPlayers }) => {
+      console.log('Player left:', updatedPlayers);
       setPlayers(updatedPlayers);
       setIsReady(false);
       setStatus('waiting');
     });
 
-    newSocket.on('multiplayer:error', ({ message }) => {
-      alert(`Error: ${message}`);
-      onCancel();
+    socketService.on('multiplayer:error', ({ message }) => {
+      console.error('Multiplayer error:', message);
+      setError(message);
+      setStatus('error');
+    });
+
+    socketService.on('multiplayer:connecting', () => {
+      setStatus('connecting');
     });
 
     return () => {
-      if (newSocket && roomId) {
-        newSocket.emit('multiplayer:leave', { roomId });
-      }
-      if (newSocket) {
-        newSocket.disconnect();
-      }
+      socketService.off('multiplayer:rooms-list');
+      socketService.off('multiplayer:room-created');
+      socketService.off('multiplayer:player-joined');
+      socketService.off('multiplayer:ready-status');
+      socketService.off('multiplayer:game-start');
+      socketService.off('multiplayer:player-left');
+      socketService.off('multiplayer:error');
+      socketService.off('multiplayer:connecting');
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameType, user, onGameStart, onCancel]);
+  }, [user, roomId, onGameStart]);
 
   const toggleReady = () => {
-    if (socket && roomId) {
+    if (roomId) {
       const newReady = !isReady;
       setIsReady(newReady);
-      socket.emit('multiplayer:ready', { roomId, ready: newReady });
+      socketService.emit('multiplayer:ready', { roomId, ready: newReady });
     }
   };
 
   const handleCancel = () => {
-    if (socket && roomId) {
-      socket.emit('multiplayer:leave', { roomId });
+    if (roomId) {
+      socketService.emit('multiplayer:leave', { roomId });
     }
     onCancel();
   };
+
+  // Browsing/Finding match screen
+  if (!roomId) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div className="card max-w-md w-full bg-gray-900 border-2 border-quantum-accent">
+          <div className="text-center mb-6">
+            <h2 className="text-3xl font-black text-quantum-accent mb-2">Find Opponent</h2>
+            <p className="text-quantum-ghost">{gameName}</p>
+          </div>
+
+          {/* Error message */}
+          {error && (
+            <div className="mb-4 p-3 bg-red-500 bg-opacity-20 border border-red-500 rounded-lg">
+              <p className="text-red-400 text-sm">{error}</p>
+            </div>
+          )}
+
+          {/* Quick Match Button */}
+          <button
+            onClick={startAutoMatch}
+            disabled={isAutoMatching}
+            className={`w-full p-4 rounded-lg mb-4 font-bold transition-all ${
+              isAutoMatching 
+                ? 'bg-quantum-primary bg-opacity-50 cursor-not-allowed'
+                : 'bg-quantum-primary hover:bg-quantum-accent text-black'
+            }`}
+          >
+            {isAutoMatching ? (
+              <div className="flex items-center justify-center">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black mr-2"></div>
+                Searching...
+              </div>
+            ) : (
+              '🔍 Auto-Match'
+            )}
+          </button>
+
+          {/* OR Divider */}
+          <div className="relative mb-4">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-600"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-gray-900 text-gray-400">or</span>
+            </div>
+          </div>
+
+          {/* Manual Room ID Input */}
+          <div className="space-y-3">
+            <input
+              type="text"
+              placeholder="Enter room ID"
+              value={manualRoomId}
+              onChange={(e) => setManualRoomId(e.target.value)}
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-quantum-primary"
+            />
+            <button
+              onClick={() => joinRoomById(manualRoomId)}
+              className="w-full p-3 rounded-lg bg-quantum-ghost text-black hover:bg-quantum-accent font-bold transition-all"
+            >
+              Join Room
+            </button>
+          </div>
+
+          {/* Available Rooms List */}
+          <div className="mt-6">
+            <button
+              onClick={fetchAvailableRooms}
+              className="w-full p-2 text-sm text-quantum-ghost hover:text-quantum-accent border border-gray-700 rounded-lg transition-all mb-3"
+            >
+              Show Available Rooms
+            </button>
+
+            {availableRooms.length > 0 && (
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {availableRooms.map((room) => (
+                  <button
+                    key={room.roomId}
+                    onClick={() => joinRoomById(room.roomId)}
+                    className="w-full p-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-quantum-primary transition-all text-left"
+                  >
+                    <div className="font-bold text-quantum-primary text-sm">
+                      Room: {room.roomId.substring(0, 12)}...
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      👥 {room.playerCount}/2 players
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Cancel Button */}
+          <button
+            onClick={handleCancel}
+            className="btn-secondary w-full mt-4"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
@@ -134,7 +275,10 @@ const MultiplayerLobby = ({
               <div className="text-yellow-400">
                 <div className="text-4xl mb-2">⏳</div>
                 <div>Waiting for opponent...</div>
-                <div className="text-sm text-gray-400 mt-1">Room: {roomId?.split('-')[1]}</div>
+                <div className="text-sm text-gray-400 mt-2">
+                  <div>Share this room ID:</div>
+                  <div className="font-bold text-quantum-accent mt-1 font-mono text-lg break-all">{roomId}</div>
+                </div>
               </div>
             )}
             {status === 'waiting' && players.length === 2 && (

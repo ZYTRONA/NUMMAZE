@@ -6,16 +6,23 @@ const multiplayerRooms = new Map();
 const setupMultiplayerHandlers = (io, socket) => {
   
   // Create or join a multiplayer game room
-  socket.on('multiplayer:join', async ({ gameType, roomId, userId }) => {
+  socket.on('multiplayer:join', async ({ gameType, roomId, userId, username }) => {
     try {
-      console.log(`🎮 ${socket.id} joining ${gameType} room:`, roomId);
+      console.log(`🎮 ${socket.id} joining ${gameType} room:`, roomId, `user: ${username}`);
       
       if (!roomId) {
         // Create new room
         roomId = `${gameType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         multiplayerRooms.set(roomId, {
           gameType,
-          players: [{ socketId: socket.id, userId, ready: false, score: 0, gameState: null }],
+          players: [{ 
+            socketId: socket.id, 
+            userId, 
+            username: username || 'Anonymous',
+            ready: false, 
+            score: 0, 
+            gameState: null 
+          }],
           status: 'waiting',
           createdAt: Date.now()
         });
@@ -37,13 +44,30 @@ const setupMultiplayerHandlers = (io, socket) => {
           return;
         }
         
-        room.players.push({ socketId: socket.id, userId, ready: false, score: 0, gameState: null });
+        // Check if already in room
+        if (room.players.some(p => p.userId === userId)) {
+          socket.emit('multiplayer:error', { message: 'Already in this room' });
+          return;
+        }
+        
+        room.players.push({ 
+          socketId: socket.id, 
+          userId, 
+          username: username || 'Anonymous',
+          ready: false, 
+          score: 0, 
+          gameState: null 
+        });
         socket.join(roomId);
         
         // Notify both players
         io.to(roomId).emit('multiplayer:player-joined', { 
           roomId, 
-          players: room.players.map(p => ({ userId: p.userId, ready: p.ready }))
+          players: room.players.map(p => ({ 
+            userId: p.userId, 
+            username: p.username,
+            ready: p.ready 
+          }))
         });
         
         console.log(`✅ Player joined room: ${roomId}`);
@@ -67,7 +91,11 @@ const setupMultiplayerHandlers = (io, socket) => {
       const allReady = room.players.length === 2 && room.players.every(p => p.ready);
       
       io.to(roomId).emit('multiplayer:ready-status', { 
-        players: room.players.map(p => ({ userId: p.userId, ready: p.ready })),
+        players: room.players.map(p => ({ 
+          userId: p.userId, 
+          username: p.username,
+          ready: p.ready 
+        })),
         allReady 
       });
       
@@ -206,10 +234,12 @@ const setupMultiplayerHandlers = (io, socket) => {
           roomId,
           gameType: room.gameType,
           playerCount: room.players.length,
+          players: room.players.map(p => ({ username: p.username, userId: p.userId })),
           createdAt: room.createdAt
         });
       }
     }
+    console.log(`📋 Available ${gameType} rooms:`, availableRooms.length);
     socket.emit('multiplayer:rooms-list', { rooms: availableRooms });
   });
 };
@@ -228,7 +258,11 @@ function handlePlayerLeave(io, socket, roomId) {
       console.log(`🧹 Room deleted: ${roomId}`);
     } else {
       io.to(roomId).emit('multiplayer:player-left', { 
-        players: room.players.map(p => ({ userId: p.userId, ready: p.ready }))
+        players: room.players.map(p => ({ 
+          userId: p.userId, 
+          username: p.username,
+          ready: p.ready 
+        }))
       });
       room.status = 'waiting';
     }
