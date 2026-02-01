@@ -13,7 +13,7 @@ const useScoreSaver = (gameType, score, gameActive) => {
           if (!token) return;
 
           await axios.post(
-            `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/users/update-game-points`,
+            `${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/users/update-game-points`,
             {
               gameType,
               points: score - lastSavedScore.current
@@ -64,7 +64,7 @@ const useScoreSaver = (gameType, score, gameActive) => {
         });
 
         navigator.sendBeacon(
-          `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/users/update-game-points`,
+          `${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/users/update-game-points`,
           new Blob([data], { type: 'application/json' })
         );
       }

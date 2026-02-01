@@ -35,6 +35,14 @@ app.use('/api/games', require('./routes/gameRoutes'));
 require('./config/socket')(io);
 
 // Health check
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'NUMMAZE API Server',
+    version: '1.0.0',
+    timestamp: new Date() 
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'Server running', timestamp: new Date() });
 });
