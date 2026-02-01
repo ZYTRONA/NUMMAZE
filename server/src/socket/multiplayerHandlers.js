@@ -13,7 +13,7 @@ const setupMultiplayerHandlers = (io, socket) => {
       if (!roomId) {
         // Create new room
         roomId = `${gameType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        multiplayerRooms.set(roomId, {
+        const newRoom = {
           gameType,
           players: [{ 
             socketId: socket.id, 
@@ -25,27 +25,31 @@ const setupMultiplayerHandlers = (io, socket) => {
           }],
           status: 'waiting',
           createdAt: Date.now()
-        });
+        };
+        multiplayerRooms.set(roomId, newRoom);
         
         socket.join(roomId);
         socket.emit('multiplayer:room-created', { roomId, gameType });
-        console.log(`✅ Created room: ${roomId}`);
+        console.log(`✅ Created room: ${roomId} with player: ${username}`);
       } else {
         // Join existing room
         const room = multiplayerRooms.get(roomId);
         
         if (!room) {
+          console.error(`❌ Room not found: ${roomId}`);
           socket.emit('multiplayer:error', { message: 'Room not found' });
           return;
         }
         
         if (room.players.length >= 2) {
+          console.error(`❌ Room full: ${roomId}`);
           socket.emit('multiplayer:error', { message: 'Room is full' });
           return;
         }
         
         // Check if already in room
         if (room.players.some(p => p.userId === userId)) {
+          console.error(`❌ Already in room: ${roomId}`);
           socket.emit('multiplayer:error', { message: 'Already in this room' });
           return;
         }
@@ -60,17 +64,19 @@ const setupMultiplayerHandlers = (io, socket) => {
         });
         socket.join(roomId);
         
-        // Notify both players
+        const updatedPlayersList = room.players.map(p => ({ 
+          userId: p.userId, 
+          username: p.username,
+          ready: p.ready 
+        }));
+        
+        console.log(`✅ Player joined room: ${roomId}. Updated players:`, updatedPlayersList);
+        
+        // Notify ALL players in the room (both old and new)
         io.to(roomId).emit('multiplayer:player-joined', { 
           roomId, 
-          players: room.players.map(p => ({ 
-            userId: p.userId, 
-            username: p.username,
-            ready: p.ready 
-          }))
+          players: updatedPlayersList
         });
-        
-        console.log(`✅ Player joined room: ${roomId}`);
       }
     } catch (error) {
       console.error('Error joining multiplayer room:', error);
@@ -81,30 +87,37 @@ const setupMultiplayerHandlers = (io, socket) => {
   // Player ready status
   socket.on('multiplayer:ready', ({ roomId, ready }) => {
     const room = multiplayerRooms.get(roomId);
-    if (!room) return;
+    if (!room) {
+      console.error(`❌ Ready: Room not found: ${roomId}`);
+      return;
+    }
     
     const player = room.players.find(p => p.socketId === socket.id);
-    if (player) {
-      player.ready = ready;
-      
-      // Check if both players are ready
-      const allReady = room.players.length === 2 && room.players.every(p => p.ready);
-      
-      io.to(roomId).emit('multiplayer:ready-status', { 
-        players: room.players.map(p => ({ 
-          userId: p.userId, 
-          username: p.username,
-          ready: p.ready 
-        })),
-        allReady 
-      });
-      
-      if (allReady && room.status === 'waiting') {
-        room.status = 'playing';
-        room.startTime = Date.now();
-        io.to(roomId).emit('multiplayer:game-start', { startTime: room.startTime });
-        console.log(`🎮 Game starting in room: ${roomId}`);
-      }
+    if (!player) {
+      console.error(`❌ Ready: Player not found in room: ${roomId}`);
+      return;
+    }
+    
+    player.ready = ready;
+    console.log(`✋ Player ready status: ${ready} in room ${roomId}. Players:`, room.players.map(p => ({ user: p.username, ready: p.ready })));
+    
+    // Check if both players are ready
+    const allReady = room.players.length === 2 && room.players.every(p => p.ready);
+    
+    io.to(roomId).emit('multiplayer:ready-status', { 
+      players: room.players.map(p => ({ 
+        userId: p.userId, 
+        username: p.username,
+        ready: p.ready 
+      })),
+      allReady 
+    });
+    
+    if (allReady && room.status === 'waiting') {
+      room.status = 'playing';
+      room.startTime = Date.now();
+      console.log(`🎮 Game starting in room: ${roomId} with players: ${room.players.map(p => p.username).join(', ')}`);
+      io.to(roomId).emit('multiplayer:game-start', { startTime: room.startTime });
     }
   });
   

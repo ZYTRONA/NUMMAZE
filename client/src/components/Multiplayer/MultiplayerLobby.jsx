@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import socketService from '../../services/socketService';
 
@@ -17,30 +17,66 @@ const MultiplayerLobby = ({
   const [manualRoomId, setManualRoomId] = useState('');
   const [error, setError] = useState(null);
   const [isAutoMatching, setIsAutoMatching] = useState(false);
+  const [isSocketReady, setIsSocketReady] = useState(false);
+  const listenersSetup = useRef(false);
 
+  // Connect socket
   useEffect(() => {
-    if (token) {
-      socketService.connect(token);
+    if (!token) return;
+    
+    const socket = socketService.connect(token);
+    
+    // Wait for socket connection
+    const onConnect = () => {
+      console.log('✅ Multiplayer socket connected, ID:', socket.id);
+      setIsSocketReady(true);
+      setError(null);
+    };
+
+    const onDisconnect = (reason) => {
+      console.log('❌ Multiplayer socket disconnected:', reason);
+      setIsSocketReady(false);
+    };
+
+    const onError = (error) => {
+      console.error('❌ Socket error:', error);
+      setError('Connection error. Please refresh the page.');
+    };
+
+    if (socket?.connected) {
+      setIsSocketReady(true);
+    } else {
+      socket?.on('connect', onConnect);
+      socket?.on('disconnect', onDisconnect);
+      socket?.on('error', onError);
     }
 
     return () => {
-      // Don't disconnect global socket
+      socket?.off('connect', onConnect);
+      socket?.off('disconnect', onDisconnect);
+      socket?.off('error', onError);
     };
   }, [token]);
 
   const fetchAvailableRooms = () => {
     if (!socketService.socket?.connected) {
-      setError('Not connected to server');
+      setError('Not connected to server. Please wait...');
       return;
     }
     socketService.emit('multiplayer:get-rooms', { gameType });
   };
 
   const startAutoMatch = () => {
+    if (!socketService.socket?.connected) {
+      setError('Not connected to server. Please wait...');
+      return;
+    }
+    
     setIsAutoMatching(true);
     setStatus('searching');
     setError(null);
     
+    console.log('🔍 Starting auto-match for', gameType);
     socketService.socket?.emit('multiplayer:join', { 
       gameType, 
       roomId: null, 
@@ -55,9 +91,15 @@ const MultiplayerLobby = ({
       return;
     }
 
+    if (!socketService.socket?.connected) {
+      setError('Not connected to server. Please wait...');
+      return;
+    }
+
     setError(null);
     setStatus('joining');
     
+    console.log('🔗 Joining room:', targetRoomId);
     socketService.socket?.emit('multiplayer:join', { 
       gameType, 
       roomId: targetRoomId, 
@@ -66,25 +108,34 @@ const MultiplayerLobby = ({
     });
   };
 
+  // Setup socket listeners (only once)
   useEffect(() => {
-    if (!socketService.socket?.connected) return;
+    if (!isSocketReady || listenersSetup.current) return;
+
+    console.log('📡 Setting up multiplayer listeners...');
+    listenersSetup.current = true;
 
     socketService.on('multiplayer:rooms-list', ({ rooms }) => {
-      console.log('Available rooms:', rooms);
+      console.log('📋 Available rooms:', rooms.length);
       setAvailableRooms(rooms);
       setStatus('browsing');
     });
 
     socketService.on('multiplayer:room-created', ({ roomId: newRoomId }) => {
-      console.log('Room created:', newRoomId);
+      console.log('✅ Room created:', newRoomId, 'with user:', user.username);
       setRoomId(newRoomId);
-      setPlayers([{ userId: user._id, username: user.username, ready: false }]);
+      const creatorPlayer = { 
+        userId: user._id, 
+        username: user.username, 
+        ready: false 
+      };
+      setPlayers([creatorPlayer]);
       setStatus('waiting');
       setIsAutoMatching(false);
     });
 
     socketService.on('multiplayer:player-joined', ({ roomId: joinedRoomId, players: updatedPlayers }) => {
-      console.log('Player joined room:', joinedRoomId, updatedPlayers);
+      console.log('👤 Player joined. Room:', joinedRoomId, 'Players count:', updatedPlayers.length, 'Players:', updatedPlayers);
       setRoomId(joinedRoomId);
       setPlayers(updatedPlayers);
       setStatus('waiting');
@@ -93,33 +144,30 @@ const MultiplayerLobby = ({
     });
 
     socketService.on('multiplayer:ready-status', ({ players: updatedPlayers, allReady }) => {
-      console.log('Ready status updated:', updatedPlayers, allReady);
+      console.log('✋ Ready status:', updatedPlayers, 'All Ready:', allReady);
       setPlayers(updatedPlayers);
-      if (allReady) {
+      if (allReady && updatedPlayers.length === 2) {
+        console.log('🎮 Both players ready! Starting game...');
         setStatus('starting');
       }
     });
 
     socketService.on('multiplayer:game-start', ({ startTime }) => {
-      console.log('Game starting...');
+      console.log('🎮 Game starting...');
       onGameStart(socketService.socket, roomId);
     });
 
     socketService.on('multiplayer:player-left', ({ players: updatedPlayers }) => {
-      console.log('Player left:', updatedPlayers);
+      console.log('👋 Player left:', updatedPlayers);
       setPlayers(updatedPlayers);
       setIsReady(false);
       setStatus('waiting');
     });
 
     socketService.on('multiplayer:error', ({ message }) => {
-      console.error('Multiplayer error:', message);
+      console.error('❌ Multiplayer error:', message);
       setError(message);
       setStatus('error');
-    });
-
-    socketService.on('multiplayer:connecting', () => {
-      setStatus('connecting');
     });
 
     return () => {
@@ -130,9 +178,8 @@ const MultiplayerLobby = ({
       socketService.off('multiplayer:game-start');
       socketService.off('multiplayer:player-left');
       socketService.off('multiplayer:error');
-      socketService.off('multiplayer:connecting');
     };
-  }, [user, roomId, onGameStart]);
+  }, [isSocketReady, user._id, onGameStart, roomId]);
 
   const toggleReady = () => {
     if (roomId) {
@@ -276,6 +323,7 @@ const MultiplayerLobby = ({
                 <div className="text-4xl mb-2">⏳</div>
                 <div>Waiting for opponent...</div>
                 <div className="text-sm text-gray-400 mt-2">
+                  <div>Players in room: {players.length}/2</div>
                   <div>Share this room ID:</div>
                   <div className="font-bold text-quantum-accent mt-1 font-mono text-lg break-all">{roomId}</div>
                 </div>
