@@ -179,7 +179,7 @@ const MultiplayerLobby = ({
       socketService.off('multiplayer:player-left');
       socketService.off('multiplayer:error');
     };
-  }, [isSocketReady, user._id, onGameStart, roomId]);
+  }, [isSocketReady, user._id, user.username, onGameStart, roomId]);
 
   const toggleReady = () => {
     if (roomId) {
