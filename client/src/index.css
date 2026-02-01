@@ -1,0 +1,108 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Roboto+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Space Mono', 'Roboto Mono', monospace;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #000000;
+  background-image: 
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255, 255, 255, 0.03) 2px, rgba(255, 255, 255, 0.03) 4px),
+    repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(255, 255, 255, 0.03) 2px, rgba(255, 255, 255, 0.03) 4px);
+  color: #FFFFFF;
+  min-height: 100vh;
+  overflow-x: hidden;
+  touch-action: manipulation; /* Better mobile touch response */
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-white text-black font-bold py-2 px-6 rounded-lg 
+           hover:shadow-neon transition-all duration-300 transform hover:scale-105
+           active:scale-95 touch-manipulation min-h-[44px]; /* Mobile-friendly tap target */
+  }
+  
+  .btn-secondary {
+    @apply bg-transparent text-white border-2 border-white font-bold py-2 px-6 rounded-lg 
+           hover:bg-white hover:text-black hover:shadow-neon-pink transition-all duration-300 transform hover:scale-105
+           active:scale-95 touch-manipulation min-h-[44px];
+  }
+  
+  .card {
+    @apply bg-black bg-opacity-70 backdrop-blur-md border-2 border-white 
+           border-opacity-30 rounded-xl p-4 sm:p-6 shadow-glass;
+  }
+  
+  .input-field {
+    @apply bg-black bg-opacity-80 border-2 border-white border-opacity-40 
+           rounded-lg px-4 py-3 text-white placeholder-gray-400 
+           placeholder-opacity-50 focus:outline-none focus:ring-2 focus:ring-white focus:border-white
+           min-h-[44px] text-base; /* Prevent zoom on iOS */
+  }
+}
+
+/* Smooth animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Minimalist glow animation */
+@keyframes neonPulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.4), 0 0 20px rgba(255, 255, 255, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.6), 0 0 40px rgba(255, 255, 255, 0.3);
+  }
+}
+
+.animate-neon-pulse {
+  animation: neonPulse 2s ease-in-out infinite;
+}
+
+/* Floating animation */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* Glassmorphism scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #FFFFFF 0%, #808080 100%);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #F0F0F0 0%, #606060 100%);
+}
